@@ -1,0 +1,31 @@
+{
+    "name": "axguowen/baidubce-common",
+    "description": "baidubce php sdk common package",
+    "keywords": [
+        "baidubce",
+        "phpsdk"
+    ],      
+    "license": "Apache-2.0",
+    "authors": [
+        {
+            "name": "axguowen",
+            "email": "axguowen@qq.com"
+        }
+    ],
+    "require": {
+        "php": ">=5.3.9",
+        "psr/log": "^1.0.0",
+        "guzzle/guzzle": "~3.9"
+    },
+    "suggest": {
+        "monolog/monolog": "Adds support for logging HTTP requests and responses"
+    },
+    "require-dev": {
+        "monolog/monolog": "~1.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "BaiduBce\\": "src"
+        }
+    }
+}
