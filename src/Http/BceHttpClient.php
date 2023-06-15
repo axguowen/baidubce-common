@@ -229,7 +229,7 @@ class BceHttpClient
                 }
             }
         }
-        //Successful means 2XX or 304
+        /*/Successful means 2XX or 304
         if (!$guzzleResponse->isSuccessful()) {
             $requestId = $guzzleResponse->getHeader(HttpHeaders::BCE_REQUEST_ID);
             $message = $guzzleResponse->getReasonPhrase();
@@ -258,6 +258,7 @@ class BceHttpClient
                 $guzzleResponse->getStatusCode()
             );
         }
+        //*/
         if ($outputStream === null) {
             $body = $guzzleResponse->getBody(true);
         } else {
@@ -268,7 +269,8 @@ class BceHttpClient
         }
         return array(
             'headers' => $this->parseHeaders($guzzleResponse),
-            'body' => $body
+            'body' => $body,
+			'statuscode' => $guzzleResponse->getStatusCode()
         );
     }
 
