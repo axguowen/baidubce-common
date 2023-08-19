@@ -22,18 +22,11 @@ use BaiduBce\Bce;
 use BaiduBce\BceClientConfigOptions;
 use BaiduBce\Exception\BceClientException;
 use BaiduBce\Exception\BceServiceException;
-use BaiduBce\Log\LogFactory;
 use BaiduBce\Util\HttpUtils;
 use BaiduBce\Util\DateUtils;
 
-use Guzzle\Http\Client;
-use Guzzle\Log\MessageFormatter;
-use Guzzle\Plugin\Log\LogPlugin;
-use Guzzle\Http\EntityBody;
-use Guzzle\Http\ReadLimitEntityBody;
-
-use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
+use GuzzleHttp\Client;
+use GuzzleHttp\Psr7\Request;
 
 /**
  * Standard Http request of BCE.
@@ -45,22 +38,10 @@ class BceHttpClient
      */
     private $guzzleClient;
 
-    /**
-     * @var LoggerInterface
-     */
-    private $logger;
-
     public function __construct()
     {
+        // 实例化HTTP客户端
         $this->guzzleClient = new Client();
-        $this->logger = LogFactory::getLogger(get_class($this));
-        if (!($this->logger instanceof NullLogger)) {
-            $logPlugin = new LogPlugin(
-                new GuzzleLogAdapter(),
-                MessageFormatter::DEFAULT_FORMAT
-            );
-            $this->guzzleClient->addSubscriber($logPlugin);
-        }
     }
 
     /**
@@ -85,9 +66,7 @@ class BceHttpClient
                 }
             }
         }
-        throw new \InvalidArgumentException(
-            sprintf('No %s is specified.', HttpHeaders::CONTENT_LENGTH)
-        );
+        throw new \InvalidArgumentException(sprintf('No %s is specified.', HttpHeaders::CONTENT_LENGTH));
     }
 
 
@@ -103,7 +82,7 @@ class BceHttpClient
      * @param SignerInterface $signer This function will generate authorization header.
      * @param resource|string $outputStream Write the Http response to this stream.
      *
-     * @return \Guzzle\Http\Message\Response body and http_headers
+     * @return \GuzzleHttp\Psr7\Response body and http_headers
      *
      * @throws BceClientException
      * @throws BceServiceException
@@ -116,45 +95,36 @@ class BceHttpClient
         array $headers,
         array $params,
         SignerInterface $signer,
-        $outputStream = null,
         $options = array()
     ) {
-        $headers[HttpHeaders::USER_AGENT] =
-            sprintf(
-                'bce-sdk-php/%s/%s/%s',
-                Bce::SDK_VERSION,
-                php_uname(),
-                phpversion()
-            );
+        $headers[HttpHeaders::USER_AGENT] = sprintf(
+            'bce-sdk-php/%s/%s/%s',
+            Bce::SDK_VERSION,
+            php_uname(),
+            phpversion()
+        );
         if (!isset($headers[HttpHeaders::BCE_DATE])) {
             $now = new \DateTime();
             $now->setTimezone(DateUtils::$UTC_TIMEZONE);
-            $headers[HttpHeaders::BCE_DATE] =
-                DateUtils::formatAlternateIso8601Date($now);
+            $headers[HttpHeaders::BCE_DATE] = DateUtils::formatAlternateIso8601Date($now);
         }
-        list($hostUrl, $hostHeader) =
-            HttpUtils::parseEndpointFromConfig($config);
+        list($hostUrl, $hostHeader) = HttpUtils::parseEndpointFromConfig($config);
         $headers[HttpHeaders::HOST] = $hostHeader;
         $url = $hostUrl . HttpUtils::urlEncodeExceptSlash($path);
         $queryString = HttpUtils::getCanonicalQueryString($params, false);
         if ($queryString !== '') {
-            $url .= "?$queryString";
+            $url .= '?' . $queryString;
         }
 
         if (!isset($headers[HttpHeaders::CONTENT_LENGTH])) {
-            $headers[HttpHeaders::CONTENT_LENGTH] =
-                $this->guessContentLength($body);
+            $headers[HttpHeaders::CONTENT_LENGTH] = $this->guessContentLength($body);
         }
         $entityBody = null;
         if ($headers[HttpHeaders::CONTENT_LENGTH] == 0) {
             //if passing a stream and content length is 0, guzzle will remove
             //"Content-Length:0" from header, to work around this, we have to 
             //set body to a empty string
-            $entityBody = "";
-        } else if (is_resource($body)) {
-            $offset = ftell($body);
-            $original = EntityBody::factory($body);
-            $entityBody = new ReadLimitEntityBody($original, $headers[HttpHeaders::CONTENT_LENGTH], $offset);
+            $entityBody = '';
         } else {
             $entityBody = $body;
         }
@@ -173,70 +143,61 @@ class BceHttpClient
             $options
         );
 
-        if (LogFactory::isDebugEnabled()) {
-            $this->logger->debug('HTTP method: ' . $httpMethod);
-            $this->logger->debug('HTTP url: ' . $url);
-            $this->logger->debug('HTTP headers: ' . print_r($headers, true));
+        $guzzleRequestOptions = array('debug' => false);
+        if (isset($config[BceClientConfigOptions::CONNECTION_TIMEOUT_IN_MILLIS])) {
+            $guzzleRequestOptions['connect_timeout'] = $config[BceClientConfigOptions::CONNECTION_TIMEOUT_IN_MILLIS] / 1000.0;
+        }
+        if (isset($config[BceClientConfigOptions::SOCKET_TIMEOUT_IN_MILLIS])) {
+            $guzzleRequestOptions['timeout'] = $config[BceClientConfigOptions::SOCKET_TIMEOUT_IN_MILLIS] / 1000.0;
         }
 
-        $guzzleRequestOptions = array('exceptions' => false);
-        if (isset(
-            $config[BceClientConfigOptions::CONNECTION_TIMEOUT_IN_MILLIS])
-        ) {
-            $guzzleRequestOptions['connect_timeout'] =
-                $config[BceClientConfigOptions::CONNECTION_TIMEOUT_IN_MILLIS]
-                    / 1000.0;
-        }
-        if (isset(
-            $config[BceClientConfigOptions::SOCKET_TIMEOUT_IN_MILLIS])
-        ) {
-            $guzzleRequestOptions['timeout'] =
-                $config[BceClientConfigOptions::SOCKET_TIMEOUT_IN_MILLIS]
-                    / 1000.0;
-        }
-        $guzzleRequest =
-            $this->guzzleClient->createRequest(
-                $httpMethod,
-                $url,
-                $headers,
-                $entityBody,
-                $guzzleRequestOptions
-            );
-        if ($outputStream !== null) {
-            $guzzleRequest->setResponseBody($outputStream);
-        }
+        // 构造请求
+        $guzzleRequest = new Request(
+            $httpMethod,
+            $url,
+            $headers,
+            $entityBody,
+        );
 
         // Send request
         try {
-            $guzzleResponse = $this->guzzleClient->send($guzzleRequest);
+            $guzzleResponse = $this->guzzleClient->send($guzzleRequest, $guzzleRequestOptions);
         } catch (Throwable  $e) {
-                    $this->logger->warning(
-                        'Fail to parse error response body: '
-                        . $e->getMessage());
+
         }
 
         //statusCode < 200
-        if ($guzzleResponse->isInformational()) {
+        if ($guzzleResponse->getStatusCode() < 200) {
             throw new BceClientException('Can not handle 1xx Http status code');
         }
         //for chunked http response, http status code can not be trust
         //error code in http body also mean a failed http response
-        if ($guzzleResponse->getTransferEncoding() === 'chunked') {
-            if ($guzzleResponse->isContentType('json')) {
-                $responseBody = $guzzleResponse->json();
+        if ($guzzleResponse->getHeader(HttpHeaders::TRANSFER_ENCODING) === 'chunked') {
+            if (false !== stripos($guzzleResponse->getHeader(HttpHeaders::CONTENT_TYPE), 'json')) {
+                // 解析JSON
+                $responseData = json_decode((string) $guzzleResponse->getBody(), true);
+                if (JSON_ERROR_NONE !== json_last_error()) {
+                    throw new \Exception('Unable to parse response body into JSON: ' . json_last_error());
+                }
+                $responseBody = $responseData === null ? array() : $responseData;
                 if (isset($responseBody['code']) && $responseBody['code'] === 'InternalError') {
-                  $guzzleResponse->setStatus(500);
+                  $guzzleResponse->withStatus(500);
                 }
             }
         }
-        /*/Successful means 2XX or 304
-        if (!$guzzleResponse->isSuccessful()) {
+        //*/Successful means 2XX or 304
+        if (!(($guzzleResponse->getStatusCode() >= 200 && $guzzleResponse->getStatusCode() < 300) || $guzzleResponse->getStatusCode() == 304)) {
             $requestId = $guzzleResponse->getHeader(HttpHeaders::BCE_REQUEST_ID);
             $message = $guzzleResponse->getReasonPhrase();
             $code = null;
-            if ($guzzleResponse->isContentType('json')) {
+            if (false !== stripos($guzzleResponse->getHeader(HttpHeaders::CONTENT_TYPE), 'json')) {
                 try {
-                    $responseBody = $guzzleResponse->json();
+                    // 解析JSON
+                    $responseData = json_decode((string) $guzzleResponse->getBody(), true);
+                    if (JSON_ERROR_NONE !== json_last_error()) {
+                        throw new \Exception('Unable to parse response body into JSON: ' . json_last_error());
+                    }
+                    $responseBody = $responseData === null ? array() : $responseData;
                     if (isset($responseBody['message'])) {
                         $message = $responseBody['message'];
                     }
@@ -245,10 +206,6 @@ class BceHttpClient
                     }
                 } catch (\Exception $e) {
                     // ignore this error
-                    $this->logger->warning(
-                        'Fail to parse error response body: '
-                        . $e->getMessage()
-                    );
                 }
             }
             throw new BceServiceException(
@@ -259,31 +216,23 @@ class BceHttpClient
             );
         }
         //*/
-        if ($outputStream === null) {
-            $body = $guzzleResponse->getBody(true);
-        } else {
-            $body = null;
-            // detach the stream so that it will not be closed when the response
-            // is garbage collected.
-            $guzzleResponse->getBody()->detachStream();
-        }
+        
         return array(
             'headers' => $this->parseHeaders($guzzleResponse),
-            'body' => $body,
+            'body' => $guzzleResponse->getBody(),
 			'statuscode' => $guzzleResponse->getStatusCode()
         );
     }
 
     /**
-     * @param \Guzzle\Http\Message\Response $guzzleResponse
+     * @param \GuzzleHttp\Psr7\Response $guzzleResponse
      * @return array
      */
     private function parseHeaders($guzzleResponse)
     {
         $responseHeaders = array();
-        foreach ($guzzleResponse->getHeaders() as $header) {
-            $value = $header->toArray();
-            $responseHeaders[$header->getName()] = $value[0];
+        foreach ($guzzleResponse->getHeaders() as $key => $value) {
+            $responseHeaders[$key] = $value[0];
         }
         return $responseHeaders;
     }

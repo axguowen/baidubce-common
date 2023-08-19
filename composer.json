@@ -13,15 +13,8 @@
         }
     ],
     "require": {
-        "php": ">=5.3.9",
-        "psr/log": "^1.0.0",
-        "guzzle/guzzle": "~3.9"
-    },
-    "suggest": {
-        "monolog/monolog": "Adds support for logging HTTP requests and responses"
-    },
-    "require-dev": {
-        "monolog/monolog": "~1.4"
+        "php": ">=7.2.5",
+        "guzzlehttp/guzzle": "^6.3||^7.0"
     },
     "autoload": {
         "psr-4": {
